@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+outputs/
+weights/*.pth
+!weights/clip_region_adapter.pt
