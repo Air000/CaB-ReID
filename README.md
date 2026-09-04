@@ -173,5 +173,5 @@ python main.py train --backbone clipreid --dataset mvti --data-root ../dataset/M
 python main.py train --backbone transreid --dataset mvti --data-root ../dataset/MV-TI
 ```
 
-For TRC-31K, use `--dataset trc31k --data-root ../dataset/TRC-31K` after obtaining access. The paper training batch size is 64; changing it changes the training recipe.
+For TRC-31K, use `--dataset trc31k --data-root ../dataset/TRC-31K` after obtaining access. 
 
