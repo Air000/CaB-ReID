@@ -9,8 +9,10 @@ from .sampler import RandomIdentitySampler
 from .sampler_ddp import RandomIdentitySampler_DDP
 import torch.distributed as dist
 from .trc31k import TRC31K
+from mvti_dataset import MVTISingleView
 __factory = {
     'trc31k': TRC31K,
+    'mvti_single': MVTISingleView,
 }
 
 def train_collate_fn(batch):

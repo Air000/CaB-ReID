@@ -1,24 +1,23 @@
 import csv
 import os.path as osp
+from dataset_path import resolve_dataset_path
 
 from .bases import BaseImageDataset
 
 
 class TRC31K(BaseImageDataset):
-    """TRC-31K v1.0 image-level truck Re-ID dataset."""
-
-    dataset_dir = "TRC_31K_v1.0"
+    """TRC-31K image-level truck Re-ID dataset."""
 
     def __init__(self, root="", verbose=True, **kwargs):
         super().__init__()
-        self.dataset_dir = osp.join(root, self.dataset_dir)
+        self.dataset_dir = str(resolve_dataset_path(root))
         metadata = osp.join(self.dataset_dir, "metadata")
         train = self._read(osp.join(metadata, "train.csv"), relabel=True)
         query = self._read(osp.join(metadata, "query.csv"), relabel=False)
         gallery = self._read(osp.join(metadata, "gallery.csv"), relabel=False)
 
         if verbose:
-            print("=> TRC-31K v1.0 loaded")
+            print("=> TRC-31K loaded")
             self.print_dataset_statistics(train, query, gallery)
 
         self.train, self.query, self.gallery = train, query, gallery

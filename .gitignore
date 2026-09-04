@@ -2,5 +2,6 @@ __pycache__/
 *.py[cod]
 .DS_Store
 outputs/
+# Paper checkpoints are distributed separately from the source repository.
 weights/*.pth
 !weights/clip_region_adapter.pt

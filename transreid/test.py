@@ -10,7 +10,7 @@ from utils.logger import setup_logger
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate CaB-ReID with TransReID")
     parser.add_argument(
-        "--config_file", default="configs/trc31k/cabreid_v4_1_transreid.yml", help="path to config file", type=str
+        "--config_file", default="configs/trc31k/cabreid_transreid.yml", help="path to config file", type=str
     )
     parser.add_argument("opts", help="Modify config options using the command-line", default=None,
                         nargs=argparse.REMAINDER)
@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
     train_loader, train_loader_normal, part_cluster_loader, val_loader, num_query, num_classes, camera_num, view_num = make_dataloader(cfg)
 
-    model = make_model(cfg, num_class=num_classes, camera_num=camera_num, view_num = view_num)
+    model = make_model(cfg, num_class=num_classes, camera_num=camera_num, view_num=view_num, evaluation_only=True)
     model.load_param(cfg.TEST.WEIGHT)
 
     if cfg.DATASETS.NAMES == 'VehicleID':

@@ -1,5 +1,4 @@
 MODEL:
-  DEVICE_ID: '0'
   PRETRAIN_CHOICE: 'imagenet'
   PRETRAIN_PATH: '../weights/jx_vit_base_p16_224-80ecf9dd.pth'
   METRIC_LOSS_TYPE: 'triplet'
@@ -82,4 +81,4 @@ TEST:
   NECK_FEAT: 'before'
   FEAT_NORM: 'yes'
 
-OUTPUT_DIR: '../outputs/v4_1_transreid'
+OUTPUT_DIR: '../outputs/transreid'

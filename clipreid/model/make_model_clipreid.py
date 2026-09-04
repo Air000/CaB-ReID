@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 from cabreid import CaBReIDConfig, CaBReIDModule, PromptRegionMasker
+from cabreid.checkpoint import load_checkpoint
+from cabreid.evaluation import EvaluationMode, prepare_evaluation_model, visual_encoder
+from .clip.model import VisionTransformer
 from .clip.simple_tokenizer import SimpleTokenizer as _Tokenizer
 _tokenizer = _Tokenizer()
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
@@ -50,8 +53,8 @@ class TextEncoder(nn.Module):
         x = x[torch.arange(x.shape[0]), tokenized_prompts.argmax(dim=-1)] @ self.text_projection 
         return x
 
-class build_transformer(nn.Module):
-    def __init__(self, num_classes, camera_num, view_num, cfg):
+class build_transformer(EvaluationMode, nn.Module):
+    def __init__(self, num_classes, camera_num, view_num, cfg, evaluation_only=False):
         super(build_transformer, self).__init__()
         self.model_name = cfg.MODEL.NAME
         self.cos_layer = cfg.MODEL.COS_LAYER
@@ -68,10 +71,11 @@ class build_transformer(nn.Module):
         self.view_num = view_num
         self.sie_coe = cfg.MODEL.SIE_COE   
 
-        self.classifier = nn.Linear(self.in_planes, self.num_classes, bias=False)
-        self.classifier.apply(weights_init_classifier)
-        self.classifier_proj = nn.Linear(self.in_planes_proj, self.num_classes, bias=False)
-        self.classifier_proj.apply(weights_init_classifier)
+        if not evaluation_only:
+            self.classifier = nn.Linear(self.in_planes, self.num_classes, bias=False)
+            self.classifier.apply(weights_init_classifier)
+            self.classifier_proj = nn.Linear(self.in_planes_proj, self.num_classes, bias=False)
+            self.classifier_proj.apply(weights_init_classifier)
 
         self.bottleneck = nn.BatchNorm1d(self.in_planes)
         self.bottleneck.bias.requires_grad_(False)
@@ -83,10 +87,15 @@ class build_transformer(nn.Module):
         self.h_resolution = int((cfg.INPUT.SIZE_TRAIN[0]-16)//cfg.MODEL.STRIDE_SIZE[0] + 1)
         self.w_resolution = int((cfg.INPUT.SIZE_TRAIN[1]-16)//cfg.MODEL.STRIDE_SIZE[1] + 1)
         self.vision_stride_size = cfg.MODEL.STRIDE_SIZE[0]
-        clip_model = load_clip_to_cpu(self.model_name, self.h_resolution, self.w_resolution, self.vision_stride_size)
-        clip_model.to("cuda")
-
-        self.image_encoder = clip_model.visual
+        if evaluation_only:
+            self.image_encoder = visual_encoder(
+                VisionTransformer, self.model_name,
+                (self.h_resolution, self.w_resolution), self.vision_stride_size,
+            )
+        else:
+            clip_model = load_clip_to_cpu(self.model_name, self.h_resolution, self.w_resolution, self.vision_stride_size)
+            clip_model.to("cuda")
+            self.image_encoder = clip_model.visual
 
         if cfg.MODEL.SIE_CAMERA and cfg.MODEL.SIE_VIEW:
             self.cv_embed = nn.Parameter(torch.zeros(camera_num * view_num, self.in_planes))
@@ -101,9 +110,10 @@ class build_transformer(nn.Module):
             trunc_normal_(self.cv_embed, std=.02)
             print('camera number is : {}'.format(view_num))
 
-        dataset_name = cfg.DATASETS.NAMES
-        self.prompt_learner = PromptLearner(num_classes, dataset_name, clip_model.dtype, clip_model.token_embedding)
-        self.text_encoder = TextEncoder(clip_model)
+        if not evaluation_only:
+            dataset_name = cfg.DATASETS.NAMES
+            self.prompt_learner = PromptLearner(num_classes, dataset_name, clip_model.dtype, clip_model.token_embedding)
+            self.text_encoder = TextEncoder(clip_model)
         self.part_memory_enabled = bool(cfg.PART_MEMORY.ENABLED)
         self.part_memory_train_main_feature = str(cfg.PART_MEMORY.TRAIN_MAIN_FEATURE).lower()
         self.part_memory_memory_feature = str(cfg.PART_MEMORY.MEMORY_FEATURE).lower()
@@ -118,12 +128,19 @@ class build_transformer(nn.Module):
         cab_config = CaBReIDConfig.from_yacs(cfg)
         region_masker = None
         if cab_config.online_mask:
-            online_clip_model = load_clip_to_cpu(
-                self.model_name, self.h_resolution, self.w_resolution, self.vision_stride_size
-            )
-            online_clip_model.to("cuda")
+            if evaluation_only:
+                region_encoder = visual_encoder(
+                    VisionTransformer, self.model_name,
+                    (self.h_resolution, self.w_resolution), self.vision_stride_size,
+                )
+            else:
+                online_clip_model = load_clip_to_cpu(
+                    self.model_name, self.h_resolution, self.w_resolution, self.vision_stride_size
+                )
+                online_clip_model.to("cuda")
+                region_encoder = online_clip_model.visual
             region_masker = PromptRegionMasker(
-                online_clip_model.visual,
+                region_encoder,
                 cfg.PART_MEMORY.ONLINE_ADAPTER_PATH,
                 (self.h_resolution, self.w_resolution),
                 cfg.INPUT.PIXEL_MEAN,
@@ -153,6 +170,8 @@ class build_transformer(nn.Module):
 
     def forward(self, x = None, label=None, get_image = False, get_text = False, cam_label= None, view_label=None, mask=None, part_view_label=None, return_part_features=False, feature_mode=None):
         if get_text == True:
+            if getattr(self, "evaluation_spec", None) is not None:
+                raise RuntimeError("Text-prompt training is unavailable in an evaluation-only model.")
             prompts = self.prompt_learner(label) 
             text_features = self.text_encoder(prompts, self.prompt_learner.tokenized_prompts)
             return text_features
@@ -229,10 +248,7 @@ class build_transformer(nn.Module):
 
 
     def load_param(self, trained_path):
-        param_dict = torch.load(trained_path)
-        for i in param_dict:
-            self.state_dict()[i.replace('module.', '')].copy_(param_dict[i])
-        print('Loading pretrained model from {}'.format(trained_path))
+        load_checkpoint(self, trained_path)
 
     def load_param_finetune(self, model_path):
         param_dict = torch.load(model_path)
@@ -241,9 +257,9 @@ class build_transformer(nn.Module):
         print('Loading pretrained model for finetuning from {}'.format(model_path))
 
 
-def make_model(cfg, num_class, camera_num, view_num):
-    model = build_transformer(num_class, camera_num, view_num, cfg)
-    return model
+def make_model(cfg, num_class, camera_num, view_num, evaluation_only=False):
+    model = build_transformer(num_class, camera_num, view_num, cfg, evaluation_only=evaluation_only)
+    return prepare_evaluation_model(model, "clipreid", cfg) if evaluation_only else model
 
 
 from .clip import clip
@@ -266,7 +282,7 @@ def load_clip_to_cpu(backbone_name, h_resolution, w_resolution, vision_stride_si
 class PromptLearner(nn.Module):
     def __init__(self, num_class, dataset_name, dtype, token_embedding):
         super().__init__()
-        if dataset_name in ["VehicleID", "veri", "trc31k"]:
+        if dataset_name in ["VehicleID", "veri", "trc31k", "mvti_single"]:
             ctx_init = "A photo of a X X X X vehicle."
         else:
             ctx_init = "A photo of a X X X X person."

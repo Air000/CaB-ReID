@@ -20,7 +20,7 @@ class PortableModuleEquivalenceTest(unittest.TestCase):
             body_weight=0.5,
         )
 
-    def test_exclusive_masks_match_v4_0_formula(self):
+    def test_exclusive_masks_match_formula(self):
         masks = torch.rand(3, 2, 4, 5)
         expected_cab = (masks[:, 0:1] >= 0.45).float()
         expected_body = (masks[:, 1:2] >= 0.45).float() * (1.0 - expected_cab)
@@ -29,7 +29,7 @@ class PortableModuleEquivalenceTest(unittest.TestCase):
         self.assertTrue(torch.equal(actual[:, 1:2], expected_body))
         self.assertTrue(valid.all())
 
-    def test_masked_pool_matches_v4_0_formula(self):
+    def test_masked_pool_matches_formula(self):
         tokens = torch.randn(3, 21, 8)
         mask = torch.randint(0, 2, (3, 20)).float()
         denominator = mask.sum(1, keepdim=True)
@@ -47,7 +47,7 @@ class PortableModuleEquivalenceTest(unittest.TestCase):
         expected[:, 1:2] = (masks[:, 1:2] > 0).float() * (1.0 - (masks[:, 0:1] > 0).float())
         self.assertTrue(torch.equal(actual, expected))
 
-    def test_fusion_matches_v4_0_formula(self):
+    def test_fusion_matches_formula(self):
         global_feature = torch.randn(3, 8)
         cab_feature = torch.randn(3, 8)
         body_feature = torch.randn(3, 8)

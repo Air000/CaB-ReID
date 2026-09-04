@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 from cabreid import CaBReIDConfig, CaBReIDModule, PromptRegionMasker
+from cabreid.checkpoint import load_checkpoint
+from cabreid.evaluation import EvaluationMode, prepare_evaluation_model, visual_encoder
+from .clip.model import VisionTransformer
 from .backbones.resnet import ResNet, Bottleneck
 import copy
 from .backbones.vit_pytorch import vit_base_patch16_224_TransReID, vit_small_patch16_224_TransReID, deit_small_patch16_224_TransReID
@@ -227,11 +230,11 @@ class build_transformer(nn.Module):
         print('Loading pretrained model for finetuning from {}'.format(model_path))
 
 
-class build_transformer_local(nn.Module):
-    def __init__(self, num_classes, camera_num, view_num, cfg, factory, rearrange):
+class build_transformer_local(EvaluationMode, nn.Module):
+    def __init__(self, num_classes, camera_num, view_num, cfg, factory, rearrange, evaluation_only=False):
         super(build_transformer_local, self).__init__()
         model_path = cfg.MODEL.PRETRAIN_PATH
-        pretrain_choice = cfg.MODEL.PRETRAIN_CHOICE
+        pretrain_choice = "self" if evaluation_only else cfg.MODEL.PRETRAIN_CHOICE
         self.cos_layer = cfg.MODEL.COS_LAYER
         self.neck = cfg.MODEL.NECK
         self.neck_feat = cfg.TEST.NECK_FEAT
@@ -326,11 +329,18 @@ class build_transformer_local(nn.Module):
             token_h = getattr(self.base.patch_embed, 'num_y')
             token_w = getattr(self.base.patch_embed, 'num_x')
             stride = cfg.MODEL.STRIDE_SIZE[0] if isinstance(cfg.MODEL.STRIDE_SIZE, (list, tuple)) else cfg.MODEL.STRIDE_SIZE
-            online_clip_model = load_clip_to_cpu(
-                str(cfg.PART_MEMORY.ONLINE_CLIP_BACKBONE), token_h, token_w, int(stride)
-            )
+            if evaluation_only:
+                region_encoder = visual_encoder(
+                    VisionTransformer, str(cfg.PART_MEMORY.ONLINE_CLIP_BACKBONE),
+                    (token_h, token_w), int(stride),
+                )
+            else:
+                online_clip_model = load_clip_to_cpu(
+                    str(cfg.PART_MEMORY.ONLINE_CLIP_BACKBONE), token_h, token_w, int(stride)
+                )
+                region_encoder = online_clip_model.visual
             region_masker = PromptRegionMasker(
-                online_clip_model.visual,
+                region_encoder,
                 cfg.PART_MEMORY.ONLINE_ADAPTER_PATH,
                 (token_h, token_w),
                 cfg.INPUT.PIXEL_MEAN,
@@ -425,10 +435,7 @@ class build_transformer_local(nn.Module):
             return out
 
     def load_param(self, trained_path):
-        param_dict = torch.load(trained_path)
-        for i in param_dict:
-            self.state_dict()[i.replace('module.', '')].copy_(param_dict[i])
-        print('Loading pretrained model from {}'.format(trained_path))
+        load_checkpoint(self, trained_path)
 
     def load_param_finetune(self, model_path):
         param_dict = torch.load(model_path)
@@ -444,10 +451,12 @@ __factory_T_type = {
     'deit_small_patch16_224_TransReID': deit_small_patch16_224_TransReID
 }
 
-def make_model(cfg, num_class, camera_num, view_num):
+def make_model(cfg, num_class, camera_num, view_num, evaluation_only=False):
+    if evaluation_only and (cfg.MODEL.NAME != 'transformer' or not cfg.MODEL.JPM):
+        raise ValueError("Evaluation-only TransReID requires the paper's transformer/JPM configuration.")
     if cfg.MODEL.NAME == 'transformer':
         if cfg.MODEL.JPM:
-            model = build_transformer_local(num_class, camera_num, view_num, cfg, __factory_T_type, rearrange=cfg.MODEL.RE_ARRANGE)
+            model = build_transformer_local(num_class, camera_num, view_num, cfg, __factory_T_type, rearrange=cfg.MODEL.RE_ARRANGE, evaluation_only=evaluation_only)
             print('===========building transformer with JPM module ===========')
         else:
             model = build_transformer(num_class, camera_num, view_num, cfg, __factory_T_type)
@@ -455,4 +464,4 @@ def make_model(cfg, num_class, camera_num, view_num):
     else:
         model = Backbone(num_class, cfg)
         print('===========building ResNet===========')
-    return model
+    return prepare_evaluation_model(model, "transreid", cfg) if evaluation_only else model

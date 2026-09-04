@@ -1,5 +1,4 @@
 MODEL:
-  DEVICE_ID: '0'
   PRETRAIN_CHOICE: 'imagenet'
   PRETRAIN_PATH: ''
   METRIC_LOSS_TYPE: 'triplet'
@@ -97,4 +96,4 @@ TEST:
   NECK_FEAT: 'before'
   FEAT_NORM: 'yes'
 
-OUTPUT_DIR: '../outputs/v4_1_clipreid'
+OUTPUT_DIR: '../outputs/clipreid'
